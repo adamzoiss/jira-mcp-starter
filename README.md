@@ -50,6 +50,12 @@ jira-mcp-starter/
    ./scripts/setup.sh
    ```
 
+   Or use the Makefile convenience target:
+
+   ```bash
+   make setup
+   ```
+
 4. Copy the environment template:
 
    ```bash
@@ -57,6 +63,24 @@ jira-mcp-starter/
    ```
 
 5. Edit `.env` with your Jira settings.
+
+## Using Make
+
+The repository includes an optional `Makefile` as a convenience layer over the existing scripts. It does not replace the scripts or Python tooling; it simply gives you shorter, stable commands for common workflows.
+
+Common commands:
+
+```bash
+make
+make setup
+make test
+make run
+make test-live
+make connection-test ISSUE=ABC-123
+make clean
+```
+
+`make` by itself prints the available targets.
 
 ## Environment Variables
 
@@ -100,6 +124,12 @@ After `.env` is configured, validate connectivity by fetching a known issue:
 ./scripts/test_jira_connection.py ABC-123
 ```
 
+Or:
+
+```bash
+make connection-test ISSUE=ABC-123
+```
+
 This script automatically re-execs under `.venv/bin/python` when the virtual environment exists, loads `.env`, calls Jira, and prints the returned issue JSON if the request succeeds.
 
 ## Run the MCP Server
@@ -108,6 +138,12 @@ Start the local STDIO server with:
 
 ```bash
 ./scripts/run.sh
+```
+
+Or:
+
+```bash
+make run
 ```
 
 The server logs to `stderr` so MCP protocol messages on `stdout` remain clean.
@@ -181,6 +217,12 @@ Run the complete local test suite with:
 ./scripts/run_tests.sh
 ```
 
+Or:
+
+```bash
+make test
+```
+
 This runs:
 
 - mocked unit tests that do not require Jira access
@@ -197,6 +239,12 @@ To run only the live Jira validation tests after configuration:
 
 ```bash
 python -m unittest tests.test_live_jira -v
+```
+
+Or:
+
+```bash
+make test-live
 ```
 
 ## Connect to Codex
