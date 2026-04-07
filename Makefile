@@ -3,8 +3,17 @@ SHELL := /bin/bash
 
 ROOT_DIR := $(CURDIR)
 VENV_DIR := $(ROOT_DIR)/.venv
-VENV_PYTHON := $(VENV_DIR)/bin/python
-VENV_PIP := $(VENV_DIR)/bin/pip
+
+# On Windows, Python creates Scripts\ instead of bin/, and executables end in .exe.
+ifeq ($(OS),Windows_NT)
+  VENV_BIN    := $(VENV_DIR)/Scripts
+  VENV_PYTHON := $(VENV_BIN)/python.exe
+  VENV_PIP    := $(VENV_BIN)/pip.exe
+else
+  VENV_BIN    := $(VENV_DIR)/bin
+  VENV_PYTHON := $(VENV_BIN)/python
+  VENV_PIP    := $(VENV_BIN)/pip
+endif
 
 .PHONY: help setup venv install run test test-live test-mcp-live lint typecheck connection-test clean
 
@@ -29,7 +38,11 @@ setup:
 venv:
 	@if [[ ! -x "$(VENV_PYTHON)" ]]; then \
 		echo "Creating virtual environment in $(VENV_DIR)"; \
-		python3 -m venv "$(VENV_DIR)"; \
+		if command -v python3 >/dev/null 2>&1; then \
+			python3 -m venv "$(VENV_DIR)"; \
+		else \
+			python -m venv "$(VENV_DIR)"; \
+		fi; \
 	fi
 	"$(VENV_PYTHON)" -m pip install --upgrade pip
 
@@ -47,7 +60,7 @@ lint:
 		echo "Virtual environment not found. Run 'make setup' first." >&2; \
 		exit 1; \
 	fi
-	"$(VENV_DIR)/bin/ruff" check .
+	"$(VENV_BIN)/ruff" check .
 
 typecheck:
 	@if [[ ! -x "$(VENV_PYTHON)" ]]; then \

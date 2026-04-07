@@ -9,7 +9,12 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
+
+# On Windows, Python creates Scripts\ instead of bin/, and the interpreter is python.exe.
+if sys.platform == "win32":
+    VENV_PYTHON = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+else:
+    VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
 
 if VENV_PYTHON.exists() and Path(sys.executable).resolve() != VENV_PYTHON.resolve():
     # Re-exec under the project virtualenv so imports work even without manual activation.
