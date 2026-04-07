@@ -1,3 +1,5 @@
+"""Shared utility helpers used by the Jira client, MCP server, and scripts."""
+
 from __future__ import annotations
 
 import logging
@@ -12,8 +14,10 @@ def configure_logging() -> logging.Logger:
     """Configure process-wide logging to stderr for MCP-safe output."""
     logger = logging.getLogger(LOGGER_NAME)
     if logger.handlers:
+        # Reuse the existing logger configuration so repeated imports stay idempotent.
         return logger
 
+    # MCP servers must keep stdout clean for protocol messages, so logs stay on stderr.
     handler = logging.StreamHandler()
     formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -27,6 +31,7 @@ def configure_logging() -> logging.Logger:
 
 
 def parse_bool(value: str | None, default: bool = True) -> bool:
+    """Parse a typical environment-variable boolean with a safe fallback."""
     if value is None:
         return default
 
@@ -45,6 +50,7 @@ def load_dotenv(dotenv_path: Path) -> None:
 
     for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
+        # Ignore comments, blank lines, and malformed entries instead of failing hard.
         if not line or line.startswith("#") or "=" not in line:
             continue
 
@@ -52,9 +58,11 @@ def load_dotenv(dotenv_path: Path) -> None:
         key = key.strip()
         value = value.strip()
 
+        # Keep explicitly exported environment variables authoritative over .env values.
         if not key or key in os.environ:
             continue
 
+        # Support simple quoted values without needing an external dotenv dependency.
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
             value = value[1:-1]
 
@@ -62,6 +70,7 @@ def load_dotenv(dotenv_path: Path) -> None:
 
 
 def require_env(name: str) -> str:
+    """Return a required environment variable or raise a clear configuration error."""
     value = os.getenv(name, "").strip()
     if not value:
         raise ValueError(
@@ -72,6 +81,7 @@ def require_env(name: str) -> str:
 
 
 def clean_text(value: Any) -> str | None:
+    """Normalize optional values into stripped strings or None."""
     if value is None:
         return None
     if isinstance(value, str):
@@ -80,6 +90,7 @@ def clean_text(value: Any) -> str | None:
 
 
 def get_nested(data: dict[str, Any], *keys: str) -> Any:
+    """Safely traverse nested dictionaries without raising KeyError/TypeError."""
     current: Any = data
     for key in keys:
         if not isinstance(current, dict):
@@ -88,4 +99,3 @@ def get_nested(data: dict[str, Any], *keys: str) -> Any:
         if current is None:
             return None
     return current
-

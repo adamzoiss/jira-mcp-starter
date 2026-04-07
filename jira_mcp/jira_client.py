@@ -1,3 +1,5 @@
+"""Jira REST client and response-shaping logic used by the MCP tools."""
+
 from __future__ import annotations
 
 import os
@@ -45,6 +47,8 @@ class JiraRequestValidationError(JiraClientError):
 
 @dataclass(frozen=True)
 class JiraConfig:
+    """Normalized runtime configuration for Jira connectivity."""
+
     base_url: str
     user: str
     token: str
@@ -54,6 +58,7 @@ class JiraConfig:
 
     @classmethod
     def from_env(cls) -> "JiraConfig":
+        """Build configuration from environment variables with validation."""
         verify_tls = parse_bool(value=require_env_optional("JIRA_VERIFY_TLS"), default=True)
         timeout_seconds = parse_positive_int(
             name="JIRA_TIMEOUT_SECONDS",
@@ -76,11 +81,13 @@ class JiraConfig:
 
 
 def require_env_optional(name: str) -> str | None:
+    """Read an optional environment variable and strip surrounding whitespace."""
     value = os.getenv(name)
     return value.strip() if value else None
 
 
 def parse_positive_int(name: str, value: str | None, default: int) -> int:
+    """Parse a positive integer environment variable or raise a clear error."""
     if value is None:
         return default
     try:
@@ -93,6 +100,7 @@ def parse_positive_int(name: str, value: str | None, default: int) -> int:
 
 
 def parse_non_negative_int(name: str, value: str | None, default: int) -> int:
+    """Parse a non-negative integer environment variable or raise a clear error."""
     if value is None:
         return default
     try:
@@ -105,11 +113,14 @@ def parse_non_negative_int(name: str, value: str | None, default: int) -> int:
 
 
 class JiraClient:
+    """Small Jira REST client focused on the MCP tools used by this project."""
+
     def __init__(self, config: JiraConfig) -> None:
         self.config = config
         self.session = self._build_session(config)
 
     def _build_session(self, config: JiraConfig) -> Session:
+        """Create a configured requests session for repeated Jira API calls."""
         session = requests.Session()
         session.auth = HTTPBasicAuth(config.user, config.token)
         session.headers.update(
@@ -126,10 +137,12 @@ class JiraClient:
         return session
 
     def get_issue(self, key: str) -> dict[str, Any]:
+        """Fetch one issue and reduce the large Jira payload into a compact shape."""
         normalized_key = key.strip().upper()
         if not normalized_key:
             raise ValueError("Issue key must not be empty.")
 
+        # Limit the fields we request so the MCP response stays concise and predictable.
         fields = ",".join(
             [
                 "summary",
@@ -154,10 +167,12 @@ class JiraClient:
         return self._serialize_issue_detail(payload)
 
     def search_issues(self, jql: str, max_results: int = 10) -> dict[str, Any]:
+        """Run a JQL search and return a compact list of issue summaries."""
         normalized_jql = jql.strip()
         if not normalized_jql:
             raise ValueError("JQL must not be empty.")
 
+        # Keep search result sizes bounded even if the caller asks for more.
         capped_results = max(1, min(max_results, 100))
         payload = self._request_json(
             "GET",
@@ -186,11 +201,13 @@ class JiraClient:
         *,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Execute a Jira request with retries, timeout handling, and JSON parsing."""
         url = f"{self.config.base_url}{path}"
         last_error: Exception | None = None
 
         for attempt in range(self.config.max_retries + 1):
             try:
+                # All requests use an explicit timeout so the MCP server cannot hang forever.
                 response = self.session.request(
                     method=method,
                     url=url,
@@ -203,6 +220,7 @@ class JiraClient:
                 last_error = exc
                 should_retry = attempt < self.config.max_retries and self._is_retryable(exc)
                 if should_retry:
+                    # Use a tiny linear backoff to smooth over transient network hiccups.
                     sleep_seconds = 0.5 * (attempt + 1)
                     LOGGER.warning(
                         "Jira request failed on attempt %s/%s: %s. Retrying in %.1fs.",
@@ -220,6 +238,7 @@ class JiraClient:
         raise JiraClientError("Jira request failed for an unknown reason.")
 
     def _raise_for_status(self, response: Response) -> None:
+        """Translate Jira HTTP status codes into more meaningful client exceptions."""
         status_code = response.status_code
         if 200 <= status_code < 300:
             return
@@ -242,6 +261,7 @@ class JiraClient:
         raise JiraClientError(f"Unexpected Jira response status {status_code}: {message}")
 
     def _extract_error_message(self, response: Response) -> str:
+        """Pull the most useful human-readable error string from a Jira response."""
         try:
             payload = response.json()
         except ValueError:
@@ -258,6 +278,7 @@ class JiraClient:
         return "No additional error details were returned."
 
     def _parse_json(self, response: Response) -> dict[str, Any]:
+        """Parse and validate the top-level Jira JSON response object."""
         try:
             payload = response.json()
         except ValueError as exc:
@@ -268,6 +289,7 @@ class JiraClient:
         return payload
 
     def _is_retryable(self, exc: Exception) -> bool:
+        """Retry only failures that are likely transient rather than caller mistakes."""
         if isinstance(
             exc,
             JiraAuthenticationError | JiraNotFoundError | JiraRequestValidationError | ValueError,
@@ -278,6 +300,7 @@ class JiraClient:
         return isinstance(exc, RequestException)
 
     def _serialize_issue_detail(self, issue: dict[str, Any]) -> dict[str, Any]:
+        """Transform a raw issue payload into the MCP-facing detail structure."""
         fields = issue.get("fields")
         if not isinstance(fields, dict):
             raise JiraResponseError("Jira issue response did not include valid fields.")
@@ -291,6 +314,7 @@ class JiraClient:
             issue_links = []
 
         return {
+            # Every field access is defensive because Jira Server/Data Center instances vary.
             "key": clean_text(issue.get("key")),
             "summary": clean_text(fields.get("summary")),
             "description": self._extract_description(fields.get("description")),
@@ -311,6 +335,7 @@ class JiraClient:
         }
 
     def _serialize_issue_summary(self, issue: dict[str, Any]) -> dict[str, Any]:
+        """Transform a search result issue into the lighter-weight list shape."""
         fields = issue.get("fields")
         if not isinstance(fields, dict):
             raise JiraResponseError("Jira search issue did not include valid fields.")
@@ -325,6 +350,7 @@ class JiraClient:
         }
 
     def _serialize_comment(self, comment: dict[str, Any]) -> dict[str, Any]:
+        """Normalize a Jira comment into the subset of fields exposed by the MCP tool."""
         return {
             "author": self._extract_user_display(comment.get("author")),
             "created": clean_text(comment.get("created")),
@@ -332,6 +358,7 @@ class JiraClient:
         }
 
     def _serialize_issue_link(self, link: dict[str, Any]) -> dict[str, Any] | None:
+        """Normalize one Jira issue link regardless of inward/outward direction."""
         link_type = link.get("type")
         relationship = self._extract_link_relationship(link_type, "outward")
         linked_issue = link.get("outwardIssue")
@@ -358,11 +385,13 @@ class JiraClient:
         link_type: Any,
         direction: str,
     ) -> str | None:
+        """Choose the best available relationship label for an issue link."""
         if not isinstance(link_type, dict):
             return None
         return clean_text(link_type.get(direction)) or clean_text(link_type.get("name"))
 
     def _extract_description(self, value: Any) -> str | None:
+        """Flatten Jira description fields across string, rich-text, and list shapes."""
         if value is None:
             return None
         if isinstance(value, str):
@@ -376,6 +405,7 @@ class JiraClient:
         return str(value)
 
     def _flatten_rich_text(self, value: dict[str, Any]) -> str | None:
+        """Walk Jira rich-text structures and collect text into a plain string."""
         texts: list[str] = []
 
         def walk(node: Any) -> None:
@@ -395,6 +425,7 @@ class JiraClient:
                 stripped = node["text"].strip()
                 if stripped:
                     texts.append(stripped)
+            # Jira rich text varies by deployment/version, so walk a few common child keys.
             for child_key in ("content", "paragraphs", "items"):
                 child = node.get(child_key)
                 if child is not None:
@@ -406,6 +437,7 @@ class JiraClient:
         return "\n".join(texts)
 
     def _extract_user_display(self, value: Any) -> str | None:
+        """Return the most useful display string for a Jira user-like object."""
         if not isinstance(value, dict):
             return None
         return (
@@ -415,6 +447,7 @@ class JiraClient:
         )
 
     def _extract_named_items(self, values: Any) -> list[str]:
+        """Extract `.name` from Jira arrays like components or fixVersions."""
         if not isinstance(values, list):
             return []
         output: list[str] = []
@@ -427,6 +460,7 @@ class JiraClient:
         return output
 
     def _extract_string_list(self, values: Any) -> list[str]:
+        """Normalize a list of raw label-like values into strings."""
         if not isinstance(values, list):
             return []
         output: list[str] = []
@@ -437,6 +471,7 @@ class JiraClient:
         return output
 
     def _coerce_int(self, value: Any) -> int:
+        """Best-effort integer conversion with a safe zero fallback."""
         try:
             return int(value)
         except (TypeError, ValueError):

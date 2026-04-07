@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
+# Bootstrap a local development environment for the Jira MCP project.
 set -euo pipefail
 
+# Resolve the project root relative to this script so it can be run from anywhere.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="${ROOT_DIR}/.venv"
 
@@ -13,6 +15,7 @@ echo "Creating virtual environment in ${VENV_DIR}"
 python3 -m venv "${VENV_DIR}"
 
 echo "Installing Python dependencies"
+# Install the project itself plus the development extras declared in pyproject.toml.
 "${VENV_DIR}/bin/python" -m pip install --upgrade pip
 "${VENV_DIR}/bin/pip" install -e "${ROOT_DIR}[dev]"
 

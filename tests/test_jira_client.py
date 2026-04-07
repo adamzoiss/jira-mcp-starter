@@ -1,3 +1,5 @@
+"""Unit tests for the Jira client using mocked HTTP responses."""
+
 from __future__ import annotations
 
 import os
@@ -17,6 +19,7 @@ from jira_mcp.jira_client import (
 
 
 def build_response(status_code: int, payload: dict | None = None, text: str = "") -> Mock:
+    """Create a minimal requests-like response object for client tests."""
     response = Mock()
     response.status_code = status_code
     response.text = text
@@ -29,6 +32,7 @@ def build_response(status_code: int, payload: dict | None = None, text: str = ""
 
 class JiraClientTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Use a deterministic config so tests exercise only client logic, not env loading.
         self.client = JiraClient(
             JiraConfig(
                 base_url="https://jira.example.com",
@@ -39,11 +43,13 @@ class JiraClientTests(unittest.TestCase):
         )
 
     def set_request_mock(self, request_mock: Mock) -> Mock:
+        # Replace the underlying requests call so tests can control the HTTP behavior exactly.
         session = cast(Any, self.client.session)
         session.request = request_mock
         return request_mock
 
     def test_get_issue_returns_structured_output(self) -> None:
+        # The detail serializer should keep the fields most useful to Codex and users.
         self.set_request_mock(
             Mock(
             return_value=build_response(
@@ -116,6 +122,7 @@ class JiraClientTests(unittest.TestCase):
         )
 
     def test_search_issues_returns_structured_summaries(self) -> None:
+        # Search results should stay compact and respect the server-side maxResults cap.
         request_mock = self.set_request_mock(
             Mock(
             return_value=build_response(
@@ -148,6 +155,7 @@ class JiraClientTests(unittest.TestCase):
         self.assertEqual(kwargs["params"]["maxResults"], 100)
 
     def test_retries_transient_network_failures(self) -> None:
+        # A transient timeout should be retried before the request ultimately succeeds.
         request_mock = self.set_request_mock(
             Mock(
             side_effect=[
@@ -163,6 +171,7 @@ class JiraClientTests(unittest.TestCase):
         self.assertEqual(request_mock.call_count, 2)
 
     def test_does_not_retry_not_found(self) -> None:
+        # A missing issue is a caller/data problem, not a transient failure.
         request_mock = self.set_request_mock(
             Mock(
             return_value=build_response(404, {"errorMessages": ["Issue does not exist"]})
@@ -175,6 +184,7 @@ class JiraClientTests(unittest.TestCase):
         self.assertEqual(request_mock.call_count, 1)
 
     def test_does_not_retry_bad_request(self) -> None:
+        # Invalid JQL and other 4xx validation errors should fail fast.
         request_mock = self.set_request_mock(
             Mock(
             return_value=build_response(400, {"errorMessages": ["The value 'bad' does not exist"]})
@@ -187,6 +197,7 @@ class JiraClientTests(unittest.TestCase):
         self.assertEqual(request_mock.call_count, 1)
 
     def test_authentication_error_is_raised(self) -> None:
+        # Authentication failures should bubble up as the specific client error type.
         self.set_request_mock(
             Mock(return_value=build_response(401, {"errorMessages": ["Login failed"]}))
         )
@@ -195,6 +206,7 @@ class JiraClientTests(unittest.TestCase):
             self.client.get_issue("ABC-123")
 
     def test_missing_fields_are_handled_gracefully(self) -> None:
+        # Jira payloads often omit optional fields, so serializers must stay defensive.
         self.set_request_mock(
             Mock(
             return_value=build_response(
@@ -242,6 +254,7 @@ class JiraClientTests(unittest.TestCase):
         clear=False,
     )
     def test_config_from_env_uses_timeout_and_retry_overrides(self) -> None:
+        # Environment overrides let slow on-prem Jira instances tune runtime behavior.
         config = JiraConfig.from_env()
 
         self.assertEqual(config.timeout_seconds, 25)
@@ -258,6 +271,7 @@ class JiraClientTests(unittest.TestCase):
         clear=False,
     )
     def test_config_from_env_rejects_non_positive_timeout(self) -> None:
+        # Invalid configuration should fail early with a clear validation error.
         with self.assertRaises(ValueError):
             JiraConfig.from_env()
 
@@ -272,6 +286,7 @@ class JiraClientTests(unittest.TestCase):
         clear=False,
     )
     def test_config_from_env_rejects_negative_retries(self) -> None:
+        # Retry counts must stay non-negative to keep request flow predictable.
         with self.assertRaises(ValueError):
             JiraConfig.from_env()
 

@@ -1,3 +1,5 @@
+"""Server-layer tests that validate the FastMCP tool wrappers in isolation."""
+
 from __future__ import annotations
 
 import unittest
@@ -7,6 +9,8 @@ from jira_mcp.server import get_issue, search_issues
 
 
 class FakeClient:
+    """Simple stand-in for the Jira client used by the server tool functions."""
+
     def get_issue(self, key: str) -> dict[str, object]:
         return {
             "key": key.upper(),
@@ -61,6 +65,7 @@ class FakeClient:
 class ServerToolTests(unittest.TestCase):
     @patch("jira_mcp.server.build_client", return_value=FakeClient())
     def test_get_issue_returns_mocked_issue(self, mock_build_client: MagicMock) -> None:
+        # This confirms the MCP tool wrapper delegates to the client and returns its shape.
         result = get_issue("abc-123")
 
         self.assertEqual(result["key"], "ABC-123")
@@ -72,6 +77,7 @@ class ServerToolTests(unittest.TestCase):
 
     @patch("jira_mcp.server.build_client", return_value=FakeClient())
     def test_search_issues_returns_mocked_results(self, mock_build_client: MagicMock) -> None:
+        # Search wrapper behavior should stay thin and avoid reshaping client output incorrectly.
         result = search_issues("project = ABC AND status = Open", max_results=1)
 
         self.assertEqual(result["total"], 2)

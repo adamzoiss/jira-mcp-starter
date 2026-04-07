@@ -1,3 +1,5 @@
+"""Optional live Jira integration tests that bypass MCP and hit the client directly."""
+
 from __future__ import annotations
 
 import os
@@ -9,6 +11,7 @@ from jira_mcp.jira_client import JiraClient, JiraConfig
 from jira_mcp.utils import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Load local configuration when present so the live suite can be run with minimal setup.
 load_dotenv(PROJECT_ROOT / ".env")
 
 
@@ -19,6 +22,7 @@ class JiraLiveIntegrationTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        # Skip cleanly unless the caller has opted into live Jira validation.
         cls.issue_key = os.getenv("JIRA_TEST_ISSUE_KEY", "").strip()
         default_jql = f"issuekey = {cls.issue_key}" if cls.issue_key else ""
         cls.test_jql = os.getenv("JIRA_TEST_JQL", default_jql).strip()
@@ -27,9 +31,11 @@ class JiraLiveIntegrationTests(unittest.TestCase):
                 "Set JIRA_TEST_ISSUE_KEY in .env or the shell to run live Jira integration tests."
             )
 
+        # Reuse one client instance because these tests are validating payload shape, not caching.
         cls.client = JiraClient(JiraConfig.from_env())
 
     def test_get_issue_returns_expected_shape(self) -> None:
+        # Live shape validation helps catch Jira-instance-specific payload differences.
         issue = self.client.get_issue(self.issue_key)
 
         self.assertEqual(issue["key"], self.issue_key)
@@ -49,6 +55,7 @@ class JiraLiveIntegrationTests(unittest.TestCase):
         self.assertIsInstance(issue["linked_issues"], list)
 
     def test_search_issues_returns_expected_shape(self) -> None:
+        # Search output should remain stable enough for Codex to consume reliably.
         issues = self.client.search_issues(self.test_jql, max_results=5)
 
         self.assertIn("total", issues)

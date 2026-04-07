@@ -1,3 +1,5 @@
+"""FastMCP stdio server exposing Jira tools to Codex and other MCP clients."""
+
 from __future__ import annotations
 
 import sys
@@ -7,6 +9,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 if __package__ in {None, ""}:
+    # Support direct execution with `python jira_mcp/server.py` from the repo root.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from jira_mcp.jira_client import JiraClient, JiraClientError, JiraConfig  # noqa: E402
@@ -20,6 +23,7 @@ mcp = FastMCP("jira")
 
 
 def build_client() -> JiraClient:
+    """Load runtime config and build a fresh Jira client for the current request."""
     load_dotenv(ENV_PATH)
     config = JiraConfig.from_env()
     return JiraClient(config)
@@ -31,6 +35,7 @@ def get_issue(key: str) -> dict[str, Any]:
     try:
         return build_client().get_issue(key)
     except (JiraClientError, ValueError) as exc:
+        # Raise a plain runtime error so the MCP layer returns a readable tool failure.
         LOGGER.error("get_issue failed for %s: %s", key, exc)
         raise RuntimeError(str(exc)) from exc
 
@@ -41,10 +46,12 @@ def search_issues(jql: str, max_results: int = 10) -> dict[str, Any]:
     try:
         return build_client().search_issues(jql=jql, max_results=max_results)
     except (JiraClientError, ValueError) as exc:
+        # Preserve the original message while avoiding raw transport-breaking trace spam.
         LOGGER.error("search_issues failed: %s", exc)
         raise RuntimeError(str(exc)) from exc
 
 
 if __name__ == "__main__":
+    # FastMCP handles the MCP protocol loop once the server is started.
     LOGGER.info("Starting Jira MCP server over stdio.")
     mcp.run(transport="stdio")
