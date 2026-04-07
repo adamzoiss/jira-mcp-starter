@@ -394,13 +394,13 @@ make typecheck
 To run only unit tests:
 
 ```bash
-python -m unittest discover -s tests -p 'test_*.py' -v
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 To run only the live Jira validation tests after configuration:
 
 ```bash
-python -m unittest tests.test_live_jira -v
+python3 -m unittest tests.test_live_jira -v
 ```
 
 Or:
@@ -457,7 +457,7 @@ codex mcp add jira \
   --env JIRA_USER=your.username \
   --env JIRA_TOKEN=your-token \
   --env JIRA_VERIFY_TLS=true \
-  -- python jira_mcp/server.py
+  -- python3 jira_mcp/server.py
 ```
 
 If you prefer to rely on the local `.env` file instead of passing values inline, use:
@@ -554,4 +554,4 @@ The workflow intentionally calls Python tooling directly instead of relying on `
 - Run `make typecheck`
 - Test with `./scripts/test_jira_connection.py ABC-123`
 - Run `./scripts/run_tests.sh`
-- Connect Codex with `codex mcp add jira ... -- python jira_mcp/server.py`
+- Connect Codex with `codex mcp add jira ... -- python3 jira_mcp/server.py`
