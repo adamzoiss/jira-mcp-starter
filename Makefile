@@ -40,8 +40,11 @@ venv:
 		echo "Creating virtual environment in $(VENV_DIR)"; \
 		if command -v python3 >/dev/null 2>&1; then \
 			python3 -m venv "$(VENV_DIR)"; \
-		else \
+		elif command -v python >/dev/null 2>&1; then \
 			python -m venv "$(VENV_DIR)"; \
+		else \
+			echo "python3 or python is required but was not found on PATH." >&2; \
+			exit 1; \
 		fi; \
 	fi
 	"$(VENV_PYTHON)" -m pip install --upgrade pip
