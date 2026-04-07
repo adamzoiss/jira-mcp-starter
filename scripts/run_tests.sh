@@ -3,7 +3,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
+
+# On Windows (Git Bash/MINGW, MSYS2, or Cygwin) Python creates Scripts\ instead of bin/.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    VENV_PYTHON="${ROOT_DIR}/.venv/Scripts/python.exe"
+    ;;
+  *)
+    VENV_PYTHON="${ROOT_DIR}/.venv/bin/python"
+    ;;
+esac
 
 if [[ ! -x "${VENV_PYTHON}" ]]; then
   echo "Virtual environment not found. Run ./scripts/setup.sh first." >&2
