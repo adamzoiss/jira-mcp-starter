@@ -1,0 +1,2 @@
+"""Jira MCP starter package."""
+
