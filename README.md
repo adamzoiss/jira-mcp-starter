@@ -1,26 +1,16 @@
 # Jira MCP Starter
 
-## Table Of Contents
+## Table of Contents
 
 - [Overview](#overview)
+- [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
-- [Repository Layout](#repository-layout)
-- [Prerequisites](#prerequisites)
-- [Setup](#setup)
-- [Using Make](#using-make)
-- [Environment Variables](#environment-variables)
-- [Test Jira Connectivity](#test-jira-connectivity)
-- [Run the MCP Server](#run-the-mcp-server)
-- [Request Lifecycle](#request-lifecycle)
-- [Trust an Internal CA Certificate](#trust-an-internal-ca-certificate)
-- [Run Automated Tests](#run-automated-tests)
-- [Validation and Rollout Flow](#validation-and-rollout-flow)
-- [Connect to Codex](#connect-to-codex)
-- [Example Codex Prompts](#example-codex-prompts)
-- [Implementation Notes](#implementation-notes)
+- [Setup and Configuration](#setup-and-configuration)
+- [Running and Testing](#running-and-testing)
+- [Codex Integration](#codex-integration)
+- [Development](#development)
 - [Troubleshooting](#troubleshooting)
-- [Continuous Integration](#continuous-integration)
 - [Checklist](#checklist)
 
 ## Overview
@@ -35,6 +25,27 @@ The server exposes two MCP tools:
 This starter is aimed at developers who need an on-prem Jira integration that is easy to understand, easy to run locally, and safe to hand to another engineer. The MCP server is not a hosted service and it does not maintain its own database, queue, or cache. Instead, Codex starts the server as a local process and calls its tools on demand. Each tool invocation makes a live Jira REST request, shapes the response into a compact structure, and returns that result to Codex.
 
 STDIO matters here because MCP expects the server to exchange protocol messages over standard input and output. That keeps the local integration simple: no port allocation, no reverse proxy, no inbound firewall openings, and no separate HTTP service lifecycle to manage. To avoid breaking the MCP protocol stream, logs are written to `stderr` instead of `stdout`.
+
+## Quick Start
+
+If you want the shortest path from clone to a working local integration:
+
+```bash
+make setup
+cp .env.example .env
+# fill in JIRA_BASE_URL, JIRA_USER, JIRA_TOKEN
+make connection-test ISSUE=ABC-123
+make lint
+make typecheck
+make test
+make run
+```
+
+After the local checks pass, register the server with Codex:
+
+```bash
+codex mcp add jira -- ./scripts/run.sh
+```
 
 ## How It Works
 
@@ -81,7 +92,9 @@ flowchart TD
 - The FastMCP layer owns the tool interface and converts client exceptions into MCP-safe runtime errors.
 - Logging is intentionally separated to `stderr` so MCP responses on `stdout` remain protocol-clean.
 
-## Repository Layout
+## Setup and Configuration
+
+### Repository Layout
 
 ```text
 jira-mcp-starter/
@@ -100,14 +113,14 @@ jira-mcp-starter/
     └── test_jira_connection.py
 ```
 
-## Prerequisites
+### Prerequisites
 
 - Python 3.10 or newer
 - Access to a Jira Data Center or Jira Server instance
 - A Jira username and API token, PAT, or password that your instance accepts for REST authentication
 - Shell access to run the setup and launch scripts
 
-## Setup
+### Setup
 
 1. Clone or copy this repository locally.
 2. Enter the project directory:
@@ -143,7 +156,7 @@ jira-mcp-starter/
    make test
    ```
 
-## Using Make
+### Using Make
 
 The repository includes an optional `Makefile` as a convenience layer over the existing scripts. It does not replace the scripts or Python tooling; it simply gives you shorter, stable commands for common workflows.
 
@@ -171,7 +184,7 @@ Quality commands:
 - `make lint` runs Ruff to catch import issues, style drift, and a set of common bug-prone patterns.
 - `make typecheck` runs mypy to validate that the annotated Python interfaces still match how the code is actually used.
 
-## Environment Variables
+### Environment Variables
 
 The server reads configuration from environment variables or a local `.env` file in the project root.
 
@@ -221,7 +234,70 @@ Optional test-only variables:
 - `JIRA_TEST_JQL`
   Optional JQL for the live search test. Defaults to `project = ABC ORDER BY updated DESC` in the example template and falls back to `issuekey = <JIRA_TEST_ISSUE_KEY>` if omitted
 
-## Test Jira Connectivity
+### Trust an Internal CA Certificate
+
+If your Jira Data Center or Jira Server instance uses a certificate chain signed by an internal or self-managed CA, prefer adding that CA certificate to the operating system trust store or setting `REQUESTS_CA_BUNDLE`. Avoid setting `JIRA_VERIFY_TLS=false` unless you are doing short-lived local debugging.
+
+#### Windows
+
+For a machine-wide trust configuration:
+
+1. Export the root CA certificate from your internal PKI as a public `.cer` file.
+2. Open the local machine certificate manager with `certlm.msc` or use `mmc` with the Certificates snap-in for the local computer.
+3. Import the certificate into `Trusted Root Certification Authorities`.
+
+Command-line alternative:
+
+```powershell
+certutil -addstore root C:\path\to\corporate-root.cer
+```
+
+After import, start a new shell before rerunning the connection test.
+
+#### macOS
+
+Using Keychain Access:
+
+1. Open `Keychain Access`.
+2. Select the `System` keychain.
+3. Drag the CA certificate into Keychain Access.
+4. Open the certificate, expand `Trust`, and set the relevant SSL trust policy if your environment requires an explicit override.
+
+Restart the terminal session after import so tools pick up the updated trust settings.
+
+#### Linux
+
+Linux trust-store commands vary by distribution.
+
+For Debian or Ubuntu:
+
+```bash
+sudo cp corporate-root-ca.crt /usr/local/share/ca-certificates/
+sudo update-ca-certificates
+```
+
+For RHEL, Rocky, AlmaLinux, CentOS Stream, or Fedora:
+
+```bash
+sudo cp corporate-root-ca.crt /etc/pki/ca-trust/source/anchors/
+sudo update-ca-trust extract
+```
+
+If browser-based testing still fails after installing the CA, restart the browser. On Ubuntu, snap-packaged applications may not automatically pick up certificates added to the host trust store.
+
+#### Project-Local Alternative
+
+If you do not want to change the operating system trust store, point Python `requests` at a CA bundle file:
+
+```dotenv
+REQUESTS_CA_BUNDLE=/absolute/path/to/corporate-root-ca.pem
+```
+
+This keeps `JIRA_VERIFY_TLS=true` while allowing this project to trust your internal CA.
+
+## Running and Testing
+
+### Test Jira Connectivity
 
 After `.env` is configured, validate connectivity by fetching a known issue:
 
@@ -237,7 +313,7 @@ make connection-test ISSUE=ABC-123
 
 This script automatically re-execs under `.venv/bin/python` when the virtual environment exists, loads `.env`, calls Jira, and prints the returned issue JSON if the request succeeds.
 
-## Run the MCP Server
+### Run the MCP Server
 
 Start the local STDIO server with:
 
@@ -255,7 +331,7 @@ The server stays idle until Codex calls one of its tools. It does not fetch Jira
 
 The server logs to `stderr` so MCP protocol messages on `stdout` remain clean. If you ever print arbitrary output to `stdout` from the server code, you risk corrupting the MCP transport.
 
-## Request Lifecycle
+### Request Lifecycle
 
 The following sequence shows what happens during a typical `get_issue` or `search_issues` call.
 
@@ -280,7 +356,7 @@ sequenceDiagram
     Codex-->>Dev: Final answer using tool output
 ```
 
-### Runtime Behavior
+#### Runtime Behavior
 
 - `get_issue` calls Jira issue lookup and returns one structured issue view.
 - `search_issues` calls Jira search and returns a bounded list of issue summaries.
@@ -288,68 +364,7 @@ sequenceDiagram
 - Transient network or server-side failures are retried with a small backoff.
 - Authentication failures, invalid issue keys, and invalid JQL are surfaced as clear tool errors rather than hidden retries.
 
-## Trust an Internal CA Certificate
-
-If your Jira Data Center or Jira Server instance uses a certificate chain signed by an internal or self-managed CA, prefer adding that CA certificate to the operating system trust store or setting `REQUESTS_CA_BUNDLE`. Avoid setting `JIRA_VERIFY_TLS=false` unless you are doing short-lived local debugging.
-
-### Windows
-
-For a machine-wide trust configuration:
-
-1. Export the root CA certificate from your internal PKI as a public `.cer` file.
-2. Open the local machine certificate manager with `certlm.msc` or use `mmc` with the Certificates snap-in for the local computer.
-3. Import the certificate into `Trusted Root Certification Authorities`.
-
-Command-line alternative:
-
-```powershell
-certutil -addstore root C:\path\to\corporate-root.cer
-```
-
-After import, start a new shell before rerunning the connection test.
-
-### macOS
-
-Using Keychain Access:
-
-1. Open `Keychain Access`.
-2. Select the `System` keychain.
-3. Drag the CA certificate into Keychain Access.
-4. Open the certificate, expand `Trust`, and set the relevant SSL trust policy if your environment requires an explicit override.
-
-Restart the terminal session after import so tools pick up the updated trust settings.
-
-### Linux
-
-Linux trust-store commands vary by distribution.
-
-For Debian or Ubuntu:
-
-```bash
-sudo cp corporate-root-ca.crt /usr/local/share/ca-certificates/
-sudo update-ca-certificates
-```
-
-For RHEL, Rocky, AlmaLinux, CentOS Stream, or Fedora:
-
-```bash
-sudo cp corporate-root-ca.crt /etc/pki/ca-trust/source/anchors/
-sudo update-ca-trust extract
-```
-
-If browser-based testing still fails after installing the CA, restart the browser. On Ubuntu, snap-packaged applications may not automatically pick up certificates added to the host trust store.
-
-### Project-Local Alternative
-
-If you do not want to change the operating system trust store, point Python `requests` at a CA bundle file:
-
-```dotenv
-REQUESTS_CA_BUNDLE=/absolute/path/to/corporate-root-ca.pem
-```
-
-This keeps `JIRA_VERIFY_TLS=true` while allowing this project to trust your internal CA.
-
-## Run Automated Tests
+### Run Automated Tests
 
 Run the complete local test suite with:
 
@@ -402,7 +417,7 @@ make test-mcp-live
 
 This test launches the local MCP server over stdio, initializes an MCP client session, lists tools, and calls `get_issue` and `search_issues` through the MCP protocol itself. It validates the actual server transport path rather than talking to Jira through the Python client directly.
 
-## Validation and Rollout Flow
+### Validation and Rollout Flow
 
 Use the following sequence when bringing up the project on a new machine or handing it to another developer.
 
@@ -430,7 +445,9 @@ This flow intentionally separates local confidence checks:
 - `make test-live` proves that the real Jira integration matches the expected response shape for your environment.
 - `make test-mcp-live` proves that the stdio MCP transport, server initialization, and live Jira-backed MCP tool execution all work without needing Codex in the loop.
 
-## Connect to Codex
+## Codex Integration
+
+### Connect to Codex
 
 From the repository root, register the MCP server with Codex using:
 
@@ -453,39 +470,41 @@ Use the inline `--env` version when you want an explicit, self-contained Codex r
 
 In both cases, Codex launches the server locally and talks to it over STDIO. There is no separate deployment target, listener port, or remote MCP endpoint in this starter.
 
-## Example Codex Prompts
+### Example Codex Prompts
 
 - `Fetch Jira issue ABC-123 and summarize it`
 - `Search Jira for open bugs in project ABC`
 
-## Implementation Notes
+## Development
 
-### Transport and Process Model
+### Implementation Notes
+
+#### Transport and Process Model
 
 - The MCP server runs locally over STDIO using FastMCP.
 - Tool calls are synchronous and request-driven.
 - There is no in-process cache, database, scheduler, or background sync worker.
 
-### Authentication and TLS
+#### Authentication and TLS
 
 - Jira credentials are read from environment variables, never hardcoded.
 - `requests` uses HTTP basic auth with the configured Jira user and token or password.
 - TLS verification is enabled by default and can be customized with `REQUESTS_CA_BUNDLE`.
 
-### Resilience
+#### Resilience
 
 - Jira requests use explicit timeouts to avoid hanging the MCP server indefinitely.
 - Basic retry logic handles transient network and server-side failures.
 - Non-retryable cases such as authentication failures, invalid requests, and missing issues fail fast with clearer errors.
 - Timeout and retry defaults live in the Jira client configuration, which makes them straightforward to tune for slower on-prem Jira environments.
 
-### Data Shaping
+#### Data Shaping
 
 - The server reduces Jira’s larger REST payloads into concise structures that are easier for Codex to reason about.
 - `get_issue` emphasizes the fields most useful during investigation: summary, description, people, labels, versions, comments, and issue links.
 - `search_issues` returns compact summaries suitable for triage and follow-up prompts.
 
-### Logging
+#### Logging
 
 - Logs go to `stderr`, not `stdout`.
 - This is required to avoid corrupting MCP protocol output.
@@ -507,7 +526,7 @@ In both cases, Codex launches the server locally and talks to it over STDIO. The
 - Lint or type-check failures:
   Run `make lint` and `make typecheck`. Ruff failures usually point to style or correctness issues, while mypy failures usually mean the declared types and actual runtime behavior have drifted apart.
 
-## Continuous Integration
+### Continuous Integration
 
 The repository includes a GitHub Actions workflow at `.github/workflows/ci.yml`.
 
