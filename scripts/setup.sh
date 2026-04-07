@@ -14,7 +14,7 @@ python3 -m venv "${VENV_DIR}"
 
 echo "Installing Python dependencies"
 "${VENV_DIR}/bin/python" -m pip install --upgrade pip
-"${VENV_DIR}/bin/pip" install -r "${ROOT_DIR}/requirements.txt"
+"${VENV_DIR}/bin/pip" install -e "${ROOT_DIR}[dev]"
 
 cat <<EOF
 
@@ -29,4 +29,7 @@ Next steps:
    ./scripts/run.sh
 5. Register it with Codex:
    codex mcp add jira -- ./scripts/run.sh
+6. Run linting and type checks:
+   make lint
+   make typecheck
 EOF

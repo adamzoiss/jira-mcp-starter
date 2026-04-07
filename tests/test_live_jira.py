@@ -3,16 +3,20 @@ from __future__ import annotations
 import os
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 from jira_mcp.jira_client import JiraClient, JiraConfig
 from jira_mcp.utils import load_dotenv
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 
 class JiraLiveIntegrationTests(unittest.TestCase):
+    client: ClassVar[JiraClient]
+    issue_key: ClassVar[str]
+    test_jql: ClassVar[str]
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.issue_key = os.getenv("JIRA_TEST_ISSUE_KEY", "").strip()

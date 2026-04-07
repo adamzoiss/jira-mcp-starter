@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from jira_mcp.server import get_issue, search_issues
 
@@ -60,7 +60,7 @@ class FakeClient:
 
 class ServerToolTests(unittest.TestCase):
     @patch("jira_mcp.server.build_client", return_value=FakeClient())
-    def test_get_issue_returns_mocked_issue(self, mock_build_client) -> None:
+    def test_get_issue_returns_mocked_issue(self, mock_build_client: MagicMock) -> None:
         result = get_issue("abc-123")
 
         self.assertEqual(result["key"], "ABC-123")
@@ -71,7 +71,7 @@ class ServerToolTests(unittest.TestCase):
         mock_build_client.assert_called_once_with()
 
     @patch("jira_mcp.server.build_client", return_value=FakeClient())
-    def test_search_issues_returns_mocked_results(self, mock_build_client) -> None:
+    def test_search_issues_returns_mocked_results(self, mock_build_client: MagicMock) -> None:
         result = search_issues("project = ABC AND status = Open", max_results=1)
 
         self.assertEqual(result["total"], 2)

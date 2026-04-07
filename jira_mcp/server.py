@@ -9,9 +9,8 @@ from mcp.server.fastmcp import FastMCP
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from jira_mcp.jira_client import JiraClient, JiraConfig, JiraClientError  # noqa: E402
+from jira_mcp.jira_client import JiraClient, JiraClientError, JiraConfig  # noqa: E402
 from jira_mcp.utils import configure_logging, load_dotenv  # noqa: E402
-
 
 LOGGER = configure_logging()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -49,4 +48,3 @@ def search_issues(jql: str, max_results: int = 10) -> dict[str, Any]:
 if __name__ == "__main__":
     LOGGER.info("Starting Jira MCP server over stdio.")
     mcp.run(transport="stdio")
-

@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 LOGGER_NAME = "jira_mcp"
 
 

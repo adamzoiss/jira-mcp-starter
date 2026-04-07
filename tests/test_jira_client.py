@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import unittest
-from unittest.mock import Mock
+from typing import Any, cast
+from unittest.mock import Mock, patch
 
 from requests.exceptions import ConnectTimeout
 
@@ -36,8 +38,14 @@ class JiraClientTests(unittest.TestCase):
             )
         )
 
+    def set_request_mock(self, request_mock: Mock) -> Mock:
+        session = cast(Any, self.client.session)
+        session.request = request_mock
+        return request_mock
+
     def test_get_issue_returns_structured_output(self) -> None:
-        self.client.session.request = Mock(
+        self.set_request_mock(
+            Mock(
             return_value=build_response(
                 200,
                 {
@@ -78,6 +86,7 @@ class JiraClientTests(unittest.TestCase):
                     },
                 },
             )
+            )
         )
 
         result = self.client.get_issue("abc-123")
@@ -107,7 +116,8 @@ class JiraClientTests(unittest.TestCase):
         )
 
     def test_search_issues_returns_structured_summaries(self) -> None:
-        self.client.session.request = Mock(
+        request_mock = self.set_request_mock(
+            Mock(
             return_value=build_response(
                 200,
                 {
@@ -126,6 +136,7 @@ class JiraClientTests(unittest.TestCase):
                     ],
                 },
             )
+            )
         )
 
         result = self.client.search_issues("project = ABC", max_results=500)
@@ -133,52 +144,59 @@ class JiraClientTests(unittest.TestCase):
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["returned_count"], 1)
         self.assertEqual(result["issues"][0]["key"], "ABC-123")
-        _, kwargs = self.client.session.request.call_args
+        _, kwargs = request_mock.call_args
         self.assertEqual(kwargs["params"]["maxResults"], 100)
 
     def test_retries_transient_network_failures(self) -> None:
-        self.client.session.request = Mock(
+        request_mock = self.set_request_mock(
+            Mock(
             side_effect=[
                 ConnectTimeout("timed out"),
                 build_response(200, {"total": 0, "issues": []}),
             ]
+            )
         )
 
         result = self.client.search_issues("project = ABC", max_results=10)
 
         self.assertEqual(result["returned_count"], 0)
-        self.assertEqual(self.client.session.request.call_count, 2)
+        self.assertEqual(request_mock.call_count, 2)
 
     def test_does_not_retry_not_found(self) -> None:
-        self.client.session.request = Mock(
+        request_mock = self.set_request_mock(
+            Mock(
             return_value=build_response(404, {"errorMessages": ["Issue does not exist"]})
+            )
         )
 
         with self.assertRaises(JiraNotFoundError):
             self.client.get_issue("ABC-404")
 
-        self.assertEqual(self.client.session.request.call_count, 1)
+        self.assertEqual(request_mock.call_count, 1)
 
     def test_does_not_retry_bad_request(self) -> None:
-        self.client.session.request = Mock(
+        request_mock = self.set_request_mock(
+            Mock(
             return_value=build_response(400, {"errorMessages": ["The value 'bad' does not exist"]})
+            )
         )
 
         with self.assertRaises(JiraRequestValidationError):
             self.client.search_issues("bad jql", max_results=10)
 
-        self.assertEqual(self.client.session.request.call_count, 1)
+        self.assertEqual(request_mock.call_count, 1)
 
     def test_authentication_error_is_raised(self) -> None:
-        self.client.session.request = Mock(
-            return_value=build_response(401, {"errorMessages": ["Login failed"]})
+        self.set_request_mock(
+            Mock(return_value=build_response(401, {"errorMessages": ["Login failed"]}))
         )
 
         with self.assertRaises(JiraAuthenticationError):
             self.client.get_issue("ABC-123")
 
     def test_missing_fields_are_handled_gracefully(self) -> None:
-        self.client.session.request = Mock(
+        self.set_request_mock(
+            Mock(
             return_value=build_response(
                 200,
                 {
@@ -197,6 +215,7 @@ class JiraClientTests(unittest.TestCase):
                     },
                 },
             )
+            )
         )
 
         result = self.client.get_issue("ABC-1")
@@ -210,7 +229,52 @@ class JiraClientTests(unittest.TestCase):
         self.assertEqual(result["last_5_comments"], [])
         self.assertEqual(result["linked_issues"], [])
 
+    @patch.dict(
+        os.environ,
+        {
+            "JIRA_BASE_URL": "https://jira.example.com",
+            "JIRA_USER": "user",
+            "JIRA_TOKEN": "token",
+            "JIRA_VERIFY_TLS": "true",
+            "JIRA_TIMEOUT_SECONDS": "25",
+            "JIRA_MAX_RETRIES": "4",
+        },
+        clear=False,
+    )
+    def test_config_from_env_uses_timeout_and_retry_overrides(self) -> None:
+        config = JiraConfig.from_env()
+
+        self.assertEqual(config.timeout_seconds, 25)
+        self.assertEqual(config.max_retries, 4)
+
+    @patch.dict(
+        os.environ,
+        {
+            "JIRA_BASE_URL": "https://jira.example.com",
+            "JIRA_USER": "user",
+            "JIRA_TOKEN": "token",
+            "JIRA_TIMEOUT_SECONDS": "0",
+        },
+        clear=False,
+    )
+    def test_config_from_env_rejects_non_positive_timeout(self) -> None:
+        with self.assertRaises(ValueError):
+            JiraConfig.from_env()
+
+    @patch.dict(
+        os.environ,
+        {
+            "JIRA_BASE_URL": "https://jira.example.com",
+            "JIRA_USER": "user",
+            "JIRA_TOKEN": "token",
+            "JIRA_MAX_RETRIES": "-1",
+        },
+        clear=False,
+    )
+    def test_config_from_env_rejects_negative_retries(self) -> None:
+        with self.assertRaises(ValueError):
+            JiraConfig.from_env()
+
 
 if __name__ == "__main__":
     unittest.main()
-

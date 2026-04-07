@@ -12,8 +12,13 @@ from requests.exceptions import RequestException
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 
-from jira_mcp.utils import clean_text, configure_logging, get_nested, parse_bool, require_env
-
+from jira_mcp.utils import (
+    clean_text,
+    configure_logging,
+    get_nested,
+    parse_bool,
+    require_env,
+)
 
 LOGGER = configure_logging()
 
@@ -50,17 +55,53 @@ class JiraConfig:
     @classmethod
     def from_env(cls) -> "JiraConfig":
         verify_tls = parse_bool(value=require_env_optional("JIRA_VERIFY_TLS"), default=True)
+        timeout_seconds = parse_positive_int(
+            name="JIRA_TIMEOUT_SECONDS",
+            value=require_env_optional("JIRA_TIMEOUT_SECONDS"),
+            default=15,
+        )
+        max_retries = parse_non_negative_int(
+            name="JIRA_MAX_RETRIES",
+            value=require_env_optional("JIRA_MAX_RETRIES"),
+            default=2,
+        )
         return cls(
             base_url=require_env("JIRA_BASE_URL").rstrip("/"),
             user=require_env("JIRA_USER"),
             token=require_env("JIRA_TOKEN"),
             verify_tls=verify_tls,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
         )
 
 
 def require_env_optional(name: str) -> str | None:
     value = os.getenv(name)
     return value.strip() if value else None
+
+
+def parse_positive_int(name: str, value: str | None, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer.") from exc
+    if parsed <= 0:
+        raise ValueError(f"{name} must be a positive integer.")
+    return parsed
+
+
+def parse_non_negative_int(name: str, value: str | None, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a non-negative integer.") from exc
+    if parsed < 0:
+        raise ValueError(f"{name} must be a non-negative integer.")
+    return parsed
 
 
 class JiraClient:

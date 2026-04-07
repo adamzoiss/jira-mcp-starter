@@ -1,5 +1,28 @@
 # Jira MCP Starter
 
+## Table Of Contents
+
+- [Overview](#overview)
+- [How It Works](#how-it-works)
+- [Architecture](#architecture)
+- [Repository Layout](#repository-layout)
+- [Prerequisites](#prerequisites)
+- [Setup](#setup)
+- [Using Make](#using-make)
+- [Environment Variables](#environment-variables)
+- [Test Jira Connectivity](#test-jira-connectivity)
+- [Run the MCP Server](#run-the-mcp-server)
+- [Request Lifecycle](#request-lifecycle)
+- [Trust an Internal CA Certificate](#trust-an-internal-ca-certificate)
+- [Run Automated Tests](#run-automated-tests)
+- [Validation and Rollout Flow](#validation-and-rollout-flow)
+- [Connect to Codex](#connect-to-codex)
+- [Example Codex Prompts](#example-codex-prompts)
+- [Implementation Notes](#implementation-notes)
+- [Troubleshooting](#troubleshooting)
+- [Continuous Integration](#continuous-integration)
+- [Checklist](#checklist)
+
 ## Overview
 
 This project provides a production-quality local MCP server for Jira Data Center / Server. It runs over STDIO using the official Python MCP SDK (`FastMCP`), connects to Jira through the REST API with `requests`, and is designed to be registered with Codex CLI via `codex mcp add`.
@@ -65,7 +88,7 @@ jira-mcp-starter/
 ├── .env.example
 ├── .gitignore
 ├── README.md
-├── requirements.txt
+├── pyproject.toml
 ├── jira_mcp/
 │   ├── __init__.py
 │   ├── jira_client.py
@@ -112,10 +135,19 @@ jira-mcp-starter/
    ```
 
 5. Edit `.env` with your Jira settings.
+6. Run the local quality and test checks:
+
+   ```bash
+   make lint
+   make typecheck
+   make test
+   ```
 
 ## Using Make
 
 The repository includes an optional `Makefile` as a convenience layer over the existing scripts. It does not replace the scripts or Python tooling; it simply gives you shorter, stable commands for common workflows.
+
+Python dependencies and development tooling are declared in `pyproject.toml`, so the repository has a single dependency source of truth and is ready for normal package-style installation in local environments and CI.
 
 Common commands:
 
@@ -125,11 +157,19 @@ make setup
 make test
 make run
 make test-live
+make test-mcp-live
+make lint
+make typecheck
 make connection-test ISSUE=ABC-123
 make clean
 ```
 
 `make` by itself prints the available targets.
+
+Quality commands:
+
+- `make lint` runs Ruff to catch import issues, style drift, and a set of common bug-prone patterns.
+- `make typecheck` runs mypy to validate that the annotated Python interfaces still match how the code is actually used.
 
 ## Environment Variables
 
@@ -145,12 +185,18 @@ Configuration is loaded at request time. That makes local iteration simple: afte
   Jira PAT, API token, or password accepted by your Jira deployment
 - `JIRA_VERIFY_TLS`
   Optional. Defaults to `true`. Set to `false` only when you must connect to a Jira instance using a self-signed or otherwise untrusted certificate
+- `JIRA_TIMEOUT_SECONDS`
+  Optional. Defaults to `15`. Controls the per-request Jira HTTP timeout in seconds
+- `JIRA_MAX_RETRIES`
+  Optional. Defaults to `2`. Controls how many additional retry attempts are made for retryable failures
 - `REQUESTS_CA_BUNDLE`
   Optional. Path to a PEM CA bundle file for this project. Use this when you want Python `requests` to trust your internal CA without disabling TLS verification for Jira requests
 
 Recommended defaults:
 
 - keep `JIRA_VERIFY_TLS=true` in normal development and production-like usage
+- keep `JIRA_TIMEOUT_SECONDS=15` unless your Jira environment is consistently slower or faster than that default
+- keep `JIRA_MAX_RETRIES=2` unless you specifically want faster failure or more tolerance for transient internal network issues
 - use `REQUESTS_CA_BUNDLE` if Jira is signed by an internal CA
 - set `JIRA_VERIFY_TLS=false` only as a short-lived debugging fallback when proper CA trust is not yet configured
 
@@ -161,6 +207,8 @@ JIRA_BASE_URL=https://jira.example.com
 JIRA_USER=svc_codex
 JIRA_TOKEN=replace-me
 JIRA_VERIFY_TLS=true
+JIRA_TIMEOUT_SECONDS=15
+JIRA_MAX_RETRIES=2
 # REQUESTS_CA_BUNDLE=/absolute/path/to/corporate-root-ca.pem
 JIRA_TEST_ISSUE_KEY=ABC-123
 JIRA_TEST_JQL=project = ABC ORDER BY updated DESC
@@ -321,6 +369,13 @@ This runs:
 - mocked server tool tests that validate the MCP-facing output shape
 - optional live integration tests that run only when `JIRA_TEST_ISSUE_KEY` is set in `.env` or your shell
 
+Before opening a pull request or pushing a larger change, also run:
+
+```bash
+make lint
+make typecheck
+```
+
 To run only unit tests:
 
 ```bash
@@ -338,6 +393,14 @@ Or:
 ```bash
 make test-live
 ```
+
+To run a live end-to-end MCP transport test without Codex, use:
+
+```bash
+make test-mcp-live
+```
+
+This test launches the local MCP server over stdio, initializes an MCP client session, lists tools, and calls `get_issue` and `search_issues` through the MCP protocol itself. It validates the actual server transport path rather than talking to Jira through the Python client directly.
 
 ## Validation and Rollout Flow
 
@@ -365,6 +428,7 @@ This flow intentionally separates local confidence checks:
 - `make connection-test ISSUE=ABC-123` proves credentials, TLS trust, and basic issue access.
 - `make test` proves the mock-based behavior and output shaping without depending on Jira availability.
 - `make test-live` proves that the real Jira integration matches the expected response shape for your environment.
+- `make test-mcp-live` proves that the stdio MCP transport, server initialization, and live Jira-backed MCP tool execution all work without needing Codex in the loop.
 
 ## Connect to Codex
 
@@ -413,6 +477,7 @@ In both cases, Codex launches the server locally and talks to it over STDIO. The
 - Jira requests use explicit timeouts to avoid hanging the MCP server indefinitely.
 - Basic retry logic handles transient network and server-side failures.
 - Non-retryable cases such as authentication failures, invalid requests, and missing issues fail fast with clearer errors.
+- Timeout and retry defaults live in the Jira client configuration, which makes them straightforward to tune for slower on-prem Jira environments.
 
 ### Data Shaping
 
@@ -439,12 +504,35 @@ In both cases, Codex launches the server locally and talks to it over STDIO. The
   Verify the JQL is valid and that the Jira account can see matching issues.
 - Unexpected live behavior:
   Remember that the server does not poll or cache. If Jira changed, rerun the prompt or the tool call to fetch the latest data.
+- Lint or type-check failures:
+  Run `make lint` and `make typecheck`. Ruff failures usually point to style or correctness issues, while mypy failures usually mean the declared types and actual runtime behavior have drifted apart.
+
+## Continuous Integration
+
+The repository includes a GitHub Actions workflow at `.github/workflows/ci.yml`.
+
+On pushes to `main` and on pull requests, CI runs on:
+
+- Ubuntu
+- macOS
+- Windows
+
+For each operating system, the workflow:
+
+- installs the project and development dependencies from `pyproject.toml`
+- runs Ruff lint checks
+- runs mypy type checks
+- runs the unittest suite
+
+The workflow intentionally calls Python tooling directly instead of relying on `make`, so the hosted CI path stays portable across platforms while the local developer workflow can still use the Makefile shortcuts.
 
 ## Checklist
 
 - Fill in `.env` with `JIRA_BASE_URL`, `JIRA_USER`, and `JIRA_TOKEN`
 - Set `JIRA_TEST_ISSUE_KEY` to a real issue for live validation
 - Run `./scripts/setup.sh`
+- Run `make lint`
+- Run `make typecheck`
 - Test with `./scripts/test_jira_connection.py ABC-123`
 - Run `./scripts/run_tests.sh`
 - Connect Codex with `codex mcp add jira ... -- python jira_mcp/server.py`
